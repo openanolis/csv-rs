@@ -11,6 +11,7 @@ fn main() {
         println!("cargo:rustc-cfg=has_dev_sev");
     }
 
+    println!("cargo:rustc-check-cfg=cfg(has_dev_csv_guest)");
     if cfg!(feature = "hw_tests") || Path::new("/dev/csv-guest").exists() {
         println!("cargo:rustc-cfg=has_dev_csv_guest");
     }

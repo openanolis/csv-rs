@@ -3,9 +3,10 @@ name = "csv-rs"
 version = "0.1.0"
 authors = ["fangbaoshun <fangbaoshun@hygon.cn>"]
 edition = "2021"
-description = "Library for HYGON CSV"
+description = "Library for HYGON CSV and DCU"
+license = "Apache-2.0"
 readme = "README.md"
-keywords = ["hygon", "csv"]
+keywords = ["hygon", "csv", "dcu"]
 
 [features]
 hw_tests = []

@@ -37,14 +37,16 @@ fn get_report() {
 
     let mut csv_guest = CsvGuest::open().unwrap();
 
-    let (report, signer) = csv_guest.get_report(Some(data), Some(mnonce)).unwrap();
+    let report = csv_guest.get_report(Some(data), Some(mnonce)).unwrap();
 
-    xor_anonce(&mut data, report.anonce);
-    xor_anonce(&mut mnonce, report.anonce);
+    let report = AttestationReport::try_from(&report).unwrap();
 
-    assert_eq!(mnonce, report.body.mnonce);
-    assert_eq!(data, report.body.report_data);
-    assert_eq!([0u8; 32], signer.reserved);
+    xor_anonce(&mut data, report.tee_info().anonce());
+    xor_anonce(&mut mnonce, report.tee_info().anonce());
+
+    assert_eq!(mnonce, *report.tee_info().mnonce());
+    assert_eq!(data, *report.tee_info().report_data());
+    assert_eq!([0u8; 32], report.signer().reserved);
 }
 
 #[cfg_attr(not(has_dev_csv_guest), ignore)]
@@ -54,12 +56,13 @@ fn get_report_without_input() {
 
     let mut csv_guest = CsvGuest::open().unwrap();
 
-    let (report, signer) = csv_guest.get_report(None, None).unwrap();
+    let report = csv_guest.get_report(None, None).unwrap();
+    let report = AttestationReport::try_from(&report).unwrap();
 
-    xor_anonce(&mut data, report.anonce);
+    xor_anonce(&mut data, report.tee_info().anonce());
 
-    assert_eq!(data, report.body.report_data);
-    assert_eq!([0u8; 32], signer.reserved);
+    assert_eq!(data, *report.tee_info().report_data());
+    assert_eq!([0u8; 32], report.signer().reserved);
 }
 
 fn download_hskcek(sn: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
@@ -102,25 +105,26 @@ fn get_report_and_verify() {
 
     let mut csv_guest = CsvGuest::open().unwrap();
 
-    let (report, signature_evidence) = csv_guest.get_report(Some(data), None).unwrap();
+    let report = csv_guest.get_report(Some(data), None).unwrap();
+    let report = AttestationReport::try_from(&report).unwrap();
 
-    if let Ok(cert_data) = download_hskcek(&signature_evidence.sn) {
+    if let Ok(cert_data) = download_hskcek(&report.signer().sn) {
         let mut cert_data = &cert_data[..];
         let hsk = ca::Certificate::decode(&mut cert_data, ()).unwrap();
         let cek = csv::Certificate::decode(&mut cert_data, ()).unwrap();
-        let pek = csv::Certificate::decode(&mut &signature_evidence.pek_cert[..], ()).unwrap();
+        let pek = csv::Certificate::decode(&mut &report.signer().pek_cert[..], ()).unwrap();
         let hrk = ca::Certificate::decode(&mut &HRK[..], ()).unwrap();
 
         (&hrk, &hrk).verify().unwrap();
         (&hrk, &hsk).verify().unwrap();
         (&hsk, &cek).verify().unwrap();
         (&cek, &pek).verify().unwrap();
-        (&pek, &report).verify().unwrap();
+        (&pek, &report.tee_info()).verify().unwrap();
 
-        xor_anonce(&mut data, report.anonce);
+        xor_anonce(&mut data, report.tee_info().anonce());
 
-        assert_eq!(data, report.body.report_data);
-        assert_eq!([0u8; 32], signature_evidence.reserved);
+        assert_eq!(data, *report.tee_info().report_data());
+        assert_eq!([0u8; 32], report.signer().reserved);
     } else {
         assert!(false);
     }
