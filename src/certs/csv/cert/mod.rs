@@ -325,13 +325,19 @@ impl Certificate {
     }
 }
 
+/// Converts a fixed-width firmware chip ID to its unpadded string form.
+#[cfg(any(feature = "network", test))]
+fn normalize_chip_id(sn: &[u8]) -> std::result::Result<&str, std::str::Utf8Error> {
+    Ok(std::str::from_utf8(sn)?.trim_end_matches('\0'))
+}
+
 /// Downloads the HSK CEK certificate from the hygon certificate server.
 #[cfg(feature = "network")]
 pub async fn download_hskcek(
     sn: &[u8],
 ) -> std::result::Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
     // Convert serial number bytes to string and trim null terminator
-    let chip_id = std::str::from_utf8(sn)?.trim_end_matches('\0');
+    let chip_id = normalize_chip_id(sn)?;
     let kds_url = format!("https://cert.hygon.cn/hsk_cek?snumber={chip_id}");
     log::trace!("kds_url: {}", kds_url);
     // Create async HTTP client (recommend reusing client in production)
@@ -355,9 +361,8 @@ pub async fn get_certificate_data(
     let cert_dir =
         std::env::var("HSK_CEK_CERT_PATH").unwrap_or_else(|_| "/opt/dcu/certs".to_string());
 
-    // 2.Convert chip_id to string
-    let chip_id_str =
-        std::str::from_utf8(chip_id).map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
+    // 2. Convert the fixed-width chip ID to its unpadded string form.
+    let chip_id_str = normalize_chip_id(chip_id)?;
 
     // 3. Build full certificate path
     let cert_path = format!("{}/{}_hsk_cek.cert", cert_dir, chip_id_str);
@@ -372,5 +377,21 @@ pub async fn get_certificate_data(
             cert_path
         );
         download_hskcek(chip_id).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_chip_id;
+
+    #[test]
+    fn fixed_width_chip_id_uses_unpadded_certificate_name() {
+        let chip_id = normalize_chip_id(b"T1S70905070401\0\0").unwrap();
+
+        assert_eq!(chip_id, "T1S70905070401");
+        assert_eq!(
+            format!("{chip_id}_hsk_cek.cert"),
+            "T1S70905070401_hsk_cek.cert"
+        );
     }
 }

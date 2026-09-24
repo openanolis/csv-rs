@@ -72,6 +72,21 @@ impl DcuDevice {
         // Discover available DCU nodes
         let num_node = num_subdirs("/sys/devices/virtual/kfd/kfd/topology/nodes", "");
         let mut reports: Vec<AttestationReport> = Vec::with_capacity(num_node);
+        let hyflash_path = [
+            "/usr/local/hyhal/firmware/vbios/hyflash",
+            "/usr/local/hyhal/firmware/vbios/hyflash_x86",
+            "/opt/hyhal/vbios/hyflash_x86",
+            "/opt/hyhal/firmware/vbios/hyflash",
+            "/opt/hyhal/firmware/vbios/hyflash_x86",
+        ]
+        .into_iter()
+        .find(|path| Path::new(path).exists());
+
+        // Number of topology nodes that were skipped because they do not map to
+        // a DCU (e.g. the CPU node). hyflash only enumerates DCUs, so these have
+        // to be discounted when translating a topology node index into a
+        // hyflash `--node` index.
+        let mut invalid_dcu_count: usize = 0;
 
         // Process each DCU node
         for node in 0..num_node {
@@ -82,9 +97,36 @@ impl DcuDevice {
 
                 // Skip invalid DCU IDs
                 if dcu_id == 0 {
+                    invalid_dcu_count += 1;
                     continue;
                 }
 
+                if let Some(path) = hyflash_path {
+                    // --node argument for hyflash
+                    let node_index = node.saturating_sub(invalid_dcu_count);
+                    // Run hyflash to query the security state. The command's
+                    // exit status is not checked; only the captured output is
+                    // inspected for "SECURE" to skip non-SECURE nodes.
+                    let output = std::process::Command::new(path)
+                        .arg("--node")
+                        .arg(node_index.to_string())
+                        .arg("--securityState")
+                        .output();
+
+                    if let Ok(output) = output {
+                        let output_text = format!(
+                            "{}{}",
+                            String::from_utf8_lossy(&output.stdout),
+                            String::from_utf8_lossy(&output.stderr)
+                        );
+                        if !output_text.contains("SECURE") {
+                            trace!("Node {} (DCU ID {}) is not SECURE, skipping", node, dcu_id);
+                            continue;
+                        }
+                    }
+                } else {
+                    trace!("hyflash_x86 not found, skipping security-state check");
+                }
                 // Initialize attestation request
                 let mut args = MkfdIoctlSecurityAttestationArgs::new();
                 args.set_attestation_args(dcu_id, userdata)?;
